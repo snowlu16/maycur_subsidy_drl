@@ -1,0 +1,136 @@
+package rules;
+
+import java.util.*;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import com.maycur.sdk.rule.domain.*;
+import com.maycur.sdk.rule.domain.result.*;
+import com.maycur.sdk.rule.service.*;
+import org.joda.time.DateTime;
+import org.joda.time.Days;
+import org.slf4j.Logger;
+
+global AllowanceService allowanceService;
+global Logger logger;
+
+dialect "mvel"
+
+// ==========================================
+// 模板 1.1：含行程同行人 + 含报销人，半天(12:00)，按每人每天不汇总一条
+// 最通用的标准模板，适合大多数按天独立生成补贴的场景
+//
+// 参数说明（修改这些参数适配实际需求）：
+//   bizCode      - 补贴标准业务编码（在每刻后台补贴标准配置中获取）
+//   feeCode      - 生成补贴费用的费用类型编码（如 "88.004"）
+//   halfDayHour  - 半天判断时间阈值，默认 12（12:00 为界）
+// ==========================================
+
+declare GlobalParams
+    dateMap : Map     // 用于记录每个员工已计算的日期，实现去重
+    bizCode : String  // 补贴标准业务编码
+end
+
+rule "初始化参数"
+    salience 30
+    when
+        Reimburse()
+    then
+        String bizCode = "YOUR_BIZ_CODE";  // TODO: 替换为实际补贴标准业务编码
+        insert(new GlobalParams(new HashMap(), bizCode));
+end
+
+// ---- 报销人补贴计算 ----
+rule "报销人_每人每天一条"
+    salience 20
+    when
+        GlobalParams($dateMap: dateMap, $bizCode: bizCode)
+        Reimburse(
+            $travelRoutes: travelRoutes,
+            $reimEmployee: reimEmployee,
+            $baseCcy: baseCcy
+        )
+        eval($reimEmployee != null)
+        $travelRoute : TravelRoute(
+            $startDate: startDate,
+            $endDate: endDate,
+            $destination: destination,
+            $allowanceStandardInfos: allowanceStandardInfos
+        ) from $travelRoutes
+        $allowanceStandardInfo: AllowanceStandardInfo(
+            $bizCode.equals(ruleBizCode)
+        ) from $allowanceStandardInfos
+        $consumeTime: DateTime() from allowanceService.getTripDiffDays($travelRoute)
+    then
+        // isDayHalveOrOverlap 返回值：-1=重叠跳过；0=半天；1=全天
+        int status = allowanceService.isDayHalveOrOverlap($dateMap, $reimEmployee.getUserCode(), $consumeTime, $startDate, $endDate);
+        if (status == -1) {
+            return;
+        }
+
+        BigDecimal dailyRate = allowanceService.getDestinationAllowanceStandard($consumeTime, $allowanceStandardInfo);
+        if (dailyRate == null || dailyRate.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+
+        // 半天减半
+        if (status == 0) {
+            dailyRate = dailyRate.multiply(new BigDecimal("0.5")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        String currency = allowanceService.getDestinationAllowanceStandardCcy($consumeTime, $allowanceStandardInfo);
+        if (currency == null) currency = $baseCcy;
+
+        AllowanceResult result = new AllowanceResult($consumeTime, "YOUR_FEE_CODE", dailyRate, $baseCcy, currency); // TODO: 替换 feeCode
+        allowanceService.copyLocationFromTravelRoute($travelRoute, result);
+        result.setTravelRouteCode($travelRoute.getTravelRouteCode());
+        insert(result);
+end
+
+// ---- 行程同行人补贴计算 ----
+rule "行程参与人_每人每天一条"
+    salience 15
+    when
+        GlobalParams($dateMap: dateMap, $bizCode: bizCode)
+        Reimburse(
+            $travelRoutes: travelRoutes,
+            $baseCcy: baseCcy
+        )
+        $travelRoute : TravelRoute(
+            $startDate: startDate,
+            $endDate: endDate,
+            $destination: destination,
+            $allowanceStandardInfos: allowanceStandardInfos,
+            $travelPartnerInfo: travelPartnerInfo
+        ) from $travelRoutes
+        $allowanceStandardInfo: AllowanceStandardInfo(
+            $bizCode.equals(ruleBizCode)
+        ) from $allowanceStandardInfos
+        $partner: TravelPartner() from $travelPartnerInfo.getInternalTravelPartner()
+        eval($partner != null && $partner.getUserCode() != null)
+        $consumeTime: DateTime() from allowanceService.getTripDiffDays($travelRoute)
+    then
+        int status = allowanceService.isDayHalveOrOverlap($dateMap, $partner.getUserCode(), $consumeTime, $startDate, $endDate);
+        if (status == -1) {
+            return;
+        }
+
+        // 获取参与人对应的目的地补贴标准金额
+        BigDecimal dailyRate = allowanceService.getDestinationPartnerAllowanceStandard(
+            $consumeTime, $allowanceStandardInfos, $partner, $bizCode
+        );
+        if (dailyRate == null || dailyRate.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+
+        if (status == 0) {
+            dailyRate = dailyRate.multiply(new BigDecimal("0.5")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        String currency = allowanceService.getDestinationAllowanceStandardCcy($consumeTime, $allowanceStandardInfo);
+        if (currency == null) currency = $baseCcy;
+
+        AllowanceResult result = new AllowanceResult($consumeTime, "YOUR_FEE_CODE", dailyRate, $baseCcy, currency);
+        allowanceService.copyLocationFromTravelRoute($travelRoute, result);
+        result.setTravelRouteCode($travelRoute.getTravelRouteCode());
+        insert(result);
+end

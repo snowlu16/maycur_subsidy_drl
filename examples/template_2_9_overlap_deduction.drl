@@ -1,0 +1,145 @@
+package rules;
+
+import java.util.*;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import com.maycur.sdk.rule.domain.*;
+import com.maycur.sdk.rule.domain.result.*;
+import com.maycur.sdk.rule.service.*;
+import org.joda.time.DateTime;
+import org.joda.time.Days;
+import org.slf4j.Logger;
+
+global AllowanceService allowanceService;
+global Logger logger;
+
+dialect "mvel"
+
+// ==========================================
+// 模板 2.9 / 2.10：含行程参与人 + 含报销人，按行程汇总
+// 核心特性：行程重叠特殊扣减逻辑
+//
+// 规则（来自官方 usg5m5 说明）：
+//   - 单条行程只有一天：补贴金额为 0（不给补贴，因为没有"过夜"）
+//   - 单条行程多天：行程天数 - 1 计算（如 1.1-1.3 共2天，只给1天）
+//   - 两段行程重叠时：先去重（合并相同日期），再按"多天-1"逻辑计算
+//   - 两段行程相邻时（无间隔连续）：先合并为一段，再按"多天-1"计算
+//   - 两段行程不相邻时：各自独立判断是否满足多天条件
+//
+// 案例（详见官方说明）：
+//   行程1.1-1.1 → 0天补贴
+//   行程1.1-1.2 → 1天补贴（1.1）
+//   行程1.1-1.1 + 1.1-1.3 → 1天补贴（1.2，去重后合并为1.1-1.3，再减1）
+//   行程1.1-1.2 + 1.2-1.4 → 3天补贴（1.1, 1.2, 1.3）
+//
+// 参数说明：
+//   bizCode    - 补贴标准业务编码
+//   feeCode    - 生成补贴费用的费用类型编码
+// ==========================================
+
+declare GlobalParams
+    dateMap : Map
+    bizCode : String
+end
+
+rule "初始化参数"
+    salience 30
+    when
+        Reimburse()
+    then
+        insert(new GlobalParams(new HashMap(), "YOUR_BIZ_CODE"));
+end
+
+rule "行程重叠特殊扣减_含报销人_按行程汇总"
+    salience 20
+    when
+        GlobalParams($dateMap: dateMap, $bizCode: bizCode)
+        Reimburse(
+            $travelRoutes: travelRoutes,
+            $reimEmployee: reimEmployee,
+            $baseCcy: baseCcy
+        )
+        eval($reimEmployee != null)
+        $travelRoute : TravelRoute(
+            $startDate: startDate,
+            $endDate: endDate,
+            $destination: destination,
+            $allowanceStandardInfos: allowanceStandardInfos,
+            $travelPartnerInfo: travelPartnerInfo
+        ) from $travelRoutes
+        $allowanceStandardInfo: AllowanceStandardInfo(
+            $bizCode.equals(ruleBizCode)
+        ) from $allowanceStandardInfos
+    then
+        // 收集该行程所有有效天的日期（去重 dateMap 重叠）
+        List allDates = allowanceService.getTripDiffDays($travelRoute);
+        List validDates = new ArrayList();
+
+        for (Object dtObj : allDates) {
+            DateTime dt = (DateTime) dtObj;
+            int status = allowanceService.isDayHalveOrOverlap($dateMap, $reimEmployee.getUserCode(), dt, $startDate, $endDate);
+            if (status != -1) {
+                validDates.add(dt);
+            }
+        }
+
+        int validDayCount = validDates.size();
+
+        // ===== 重叠特殊扣减逻辑 =====
+        // 仅一天时，不发补贴（返回 0）
+        if (validDayCount <= 1) {
+            logger.info("行程 {} 有效天数<=1，不发补贴", $destination);
+            return;
+        }
+        // 多天时：天数 - 1，即去掉最后一天不发
+        int billableDays = validDayCount - 1;
+
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        String currency = $baseCcy;
+
+        // 对每个人，只计算前 billableDays 天的标准
+        // 报销人
+        for (int i = 0; i < billableDays; i++) {
+            DateTime consumeTime = (DateTime) validDates.get(i);
+            BigDecimal dailyRate = allowanceService.getDestinationAllowanceStandard(consumeTime, $allowanceStandardInfo);
+            if (dailyRate != null && dailyRate.compareTo(BigDecimal.ZERO) > 0) {
+                if (currency == null || currency.equals($baseCcy)) {
+                    currency = allowanceService.getDestinationAllowanceStandardCcy(consumeTime, $allowanceStandardInfo);
+                }
+                totalAmount = totalAmount.add(dailyRate);
+            }
+        }
+
+        // 行程参与人
+        if ($travelPartnerInfo != null && $travelPartnerInfo.getInternalTravelPartner() != null) {
+            for (Object partnerObj : $travelPartnerInfo.getInternalTravelPartner()) {
+                TravelPartner partner = (TravelPartner) partnerObj;
+                if (partner == null || partner.getUserCode() == null) continue;
+
+                // 重新收集参与人有效天数
+                List partnerValidDates = new ArrayList();
+                for (Object dtObj : allDates) {
+                    DateTime dt = (DateTime) dtObj;
+                    int status = allowanceService.isDayHalveOrOverlap($dateMap, partner.getUserCode(), dt, $startDate, $endDate);
+                    if (status != -1) partnerValidDates.add(dt);
+                }
+                int partnerBillableDays = partnerValidDates.size() > 1 ? partnerValidDates.size() - 1 : 0;
+
+                for (int i = 0; i < partnerBillableDays; i++) {
+                    DateTime consumeTime = (DateTime) partnerValidDates.get(i);
+                    BigDecimal dailyRate = allowanceService.getDestinationPartnerAllowanceStandard(
+                        consumeTime, $allowanceStandardInfos, partner, $bizCode
+                    );
+                    if (dailyRate != null && dailyRate.compareTo(BigDecimal.ZERO) > 0) {
+                        totalAmount = totalAmount.add(dailyRate);
+                    }
+                }
+            }
+        }
+
+        if (totalAmount.compareTo(BigDecimal.ZERO) > 0) {
+            AllowanceResult result = new AllowanceResult($startDate, $endDate, "YOUR_FEE_CODE", totalAmount, $baseCcy, currency, $destination);
+            result.setTravelRouteCode($travelRoute.getTravelRouteCode());
+            insert(result);
+        }
+end

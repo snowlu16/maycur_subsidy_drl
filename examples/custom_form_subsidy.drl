@@ -1,0 +1,106 @@
+package rules;
+
+import java.util.*;
+import java.math.BigDecimal;
+import com.maycur.sdk.rule.domain.*;
+import com.maycur.sdk.rule.domain.result.*;
+import com.maycur.sdk.rule.service.*;
+import org.joda.time.Days;
+import org.joda.time.DateTime;
+import org.slf4j.Logger;
+
+global AllowanceService allowanceService;
+global Logger logger;
+
+dialect "mvel"
+
+// ==========================================
+// 场景描述：
+// 单据或行程上存在自定义选择字段（例如“出差类型”：业务出差 CC-YW，培训出差 CC-PX）。
+// 系统根据用户选择的不同子选项编码，动态切换补贴标准或赋予不同的每日额度。
+// ==========================================
+
+declare TravelHalfDayKeys
+    dateMap : Map
+    bizCode : String
+end
+
+rule "初始化参数"
+    salience 30
+    when
+        Reimburse();
+    then
+        // 初始化预设标准
+        String bizCode = "dynamicFormAllowance";
+        insert(new TravelHalfDayKeys(new HashMap(), bizCode));
+end
+
+rule "自定义表单联动补贴计算"
+    salience 20
+    when
+        TravelHalfDayKeys(
+            $dateMap: dateMap,
+            $bizCode: bizCode
+        );
+        // 匹配单据头部的自定义表单集合 customFormValues
+        Reimburse(
+            $travelRoutes: travelRoutes,
+            $reimEmployee: reimEmployee,
+            $customFormValues: customFormValues,
+            $baseCcy: baseCcy
+        );
+        eval($reimEmployee != null);
+        // 从单据自定义表单集合中抽取业务编码为 "CF186" (实际表单字段编码) 的字段值
+        $customFormValue : CustomFormValue(
+            "CF186".equals(bizCode)
+        ) from $customFormValues;
+        
+        $travelRecord : TravelRoute(
+            $startDate: startDate,
+            $endDate: endDate,
+            $destination: destination,
+            $allowanceStandardInfos: allowanceStandardInfos
+        ) from $travelRoutes;
+        $allowanceStandardInfo : AllowanceStandardInfo(
+            $bizCode.equals(ruleBizCode)
+        ) from $allowanceStandardInfos;
+    then
+        List dateTimes = allowanceService.getTripDiffDays($travelRecord);
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        String currency = $baseCcy;
+
+        // 获取用户选择的选项档案编码
+        String selectedOptionCode = $customFormValue.getValue();
+        logger.info("用户表单选择的出差类型编码为: {}", selectedOptionCode);
+
+        for (Object obj : dateTimes) {
+            DateTime dt = (DateTime) obj;
+            int status = allowanceService.isDayHalveOrOverlap($dateMap, $reimEmployee.getUserCode(), dt, $startDate, $endDate);
+            if (status == -1) continue;
+
+            BigDecimal dailyRate = allowanceService.getDestinationAllowanceStandard(dt, $allowanceStandardInfo);
+            
+            // 如果未能从后台补贴标准表中匹配到金额，或者客户有针对不同选项直接覆写固定金额的需求：
+            if (dailyRate == null || dailyRate.compareTo(BigDecimal.ZERO) == 0) {
+                if ("CC-YW".equals(selectedOptionCode)) {
+                    dailyRate = new BigDecimal("200.00"); // 业务出差每天200元
+                } else if ("CC-PX".equals(selectedOptionCode)) {
+                    dailyRate = new BigDecimal("100.00"); // 培训出差每天100元
+                } else {
+                    dailyRate = new BigDecimal("120.00"); // 默认标准
+                }
+            }
+
+            if (status == 0) {
+                dailyRate = dailyRate.multiply(new BigDecimal("0.5"));
+            }
+            totalAmount = totalAmount.add(dailyRate);
+        }
+
+        if (totalAmount.compareTo(BigDecimal.ZERO) > 0) {
+            AllowanceResult result = new AllowanceResult($startDate, $endDate, "88.004", totalAmount, $baseCcy, currency, $destination);
+            result.setConsumeLocation($destination);
+            result.setTravelRouteCode($travelRecord.getTravelRouteCode());
+            insert(result);
+        }
+end

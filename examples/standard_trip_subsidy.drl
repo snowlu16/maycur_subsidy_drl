@@ -1,0 +1,103 @@
+package rules;
+
+import java.util.*;
+import java.math.BigDecimal;
+import com.maycur.sdk.rule.domain.*;
+import com.maycur.sdk.rule.domain.result.*;
+import com.maycur.sdk.rule.service.*;
+import org.joda.time.Days;
+import org.joda.time.DateTime;
+import org.joda.time.format.DateTimeFormat;
+import org.slf4j.Logger;
+
+global AllowanceService allowanceService;
+global Logger logger;
+
+dialect "mvel"
+
+// ==========================================
+// 1. 全局参数声明
+// ==========================================
+declare TravelHalfDayKeys
+    dateMap : Map       // 日期去重 Map
+    bizCode : String    // 补贴标准业务编码
+end
+
+rule "初始化参数"
+    salience 30
+    when
+        Reimburse();
+    then
+        String bizCode = "tripSummaryAllowance";
+        insert(new TravelHalfDayKeys(new HashMap(), bizCode));
+end
+
+// ==========================================
+// 2. 按行程汇总报销人补贴 (salience 20)
+// 特性：一整个行程区间合并生成一条补贴记录；判断常驻地(常驻地为0)；支持连带扣减
+// ==========================================
+rule "行程汇总报销人补贴计算"
+    salience 20
+    when
+        TravelHalfDayKeys(
+            $dateMap: dateMap,
+            $bizCode: bizCode
+        );
+        Reimburse(
+            $travelRoutes: travelRoutes,
+            $reimEmployee: reimEmployee,
+            $collectionCcy: collectionCcy,
+            $baseCcy: baseCcy
+        );
+        eval($reimEmployee != null);
+        $travelRecord : TravelRoute(
+            $startDate: startDate,
+            $endDate: endDate,
+            $destination: destination,
+            $allowanceStandardInfos: allowanceStandardInfos
+        ) from $travelRoutes;
+        $allowanceStandardInfo : AllowanceStandardInfo(
+            $bizCode.equals(ruleBizCode)
+        ) from $allowanceStandardInfos;
+    then
+        // 1. 判断目的地是否为报销人常驻地 (如果是常驻地，根据政策通常补贴为0)
+        // isResidence 第三个参数 true 为判断目的地，第四个参数 true 为非完全包含校验(包含市级即可)
+        boolean isRes = allowanceService.isResidence($reimEmployee, $travelRecord, true, true);
+        if (isRes) {
+            logger.info("行程目的地属于常驻地，不计算差旅补贴。行程目的地: {}", $destination);
+            return;
+        }
+
+        // 2. 遍历这段行程的具体每一天，累加有效补贴
+        List dateTimes = allowanceService.getTripDiffDays($travelRecord);
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        String currency = $baseCcy;
+
+        for (Object obj : dateTimes) {
+            DateTime dt = (DateTime) obj;
+            // 检查重叠
+            int status = allowanceService.isDayHalveOrOverlap($dateMap, $reimEmployee.getUserCode(), dt, $startDate, $endDate);
+            if (status == -1) {
+                continue;
+            }
+            
+            BigDecimal dailyRate = allowanceService.getDestinationAllowanceStandard(dt, $allowanceStandardInfo);
+            if (dailyRate != null && dailyRate.compareTo(BigDecimal.ZERO) > 0) {
+                if (status == 0) {
+                    dailyRate = dailyRate.multiply(new BigDecimal("0.5"));
+                }
+                totalAmount = totalAmount.add(dailyRate);
+                currency = allowanceService.getDestinationAllowanceStandardCcy(dt, $allowanceStandardInfo);
+            }
+        }
+
+        // 3. 如果累计金额大于0，才生成并插入补贴记录
+        if (totalAmount.compareTo(BigDecimal.ZERO) > 0) {
+            // 构造函数使用起止区间 (startDate, endDate)
+            AllowanceResult result = new AllowanceResult($startDate, $endDate, "88.004", totalAmount, $baseCcy, currency, $destination);
+            result.setConsumeLocation($destination);
+            result.setTravelRouteCode($travelRecord.getTravelRouteCode());
+            
+            insert(result);
+        }
+end

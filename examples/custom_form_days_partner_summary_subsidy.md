@@ -70,53 +70,37 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         );
     then
         try {
-            logger.info("==================================================");
-            logger.info("🚀 [DEBUG STEP 0] 进入规则 [根据表单自定义天数及同行人数汇总计算整单补贴] (可视化诊断调试版)");
-            logger.info("📦 [参数诊断] customFieldBizCode={}, feeCode={}, dailyRatePerPerson={}", $customFieldBizCode, $feeCode, $dailyRatePerPerson);
-            logger.info("📦 [单据诊断] Reimburse={}", $reimburse);
-
-            DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
-            String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
-            String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
-
             // ----------------------------------------------------
             // 步骤 1：读取单据表头自定义“天数”字段 (CF105)
             // ----------------------------------------------------
-            logger.info("🔍 [DEBUG STEP 1] 开始自 customFormValues 读取自定义天数字段 [{}]...", $customFieldBizCode);
             if ($customFormValues == null) {
-                logger.error("🚨 [中断代码 0.01] 单据关联的 customFormValues 自定义字段集合为 null！生成 0.01 元诊断明细！");
-                insert(new AllowanceResult(consumeDate, consumeDate, $feeCode, new BigDecimal("0.01"), ccy, colCcy));
+                logger.warn("未读取到单据表头自定义字段集合 ($customFormValues 为 null)，跳过补贴计算");
                 return;
             }
             String daysStr = allowanceService.getCustomFormValue($customFormValues, $customFieldBizCode);
-            logger.info("📄 [DEBUG STEP 1 结果] allowanceService.getCustomFormValue 返回值: [{}]", daysStr);
+            logger.info("读取到报销单自定义天数字段 [{}] 的内容为: {}", $customFieldBizCode, daysStr);
 
             if (daysStr == null || daysStr.trim().isEmpty()) {
-                logger.warn("⚠️ [中断代码 0.01] 天数字段 [{}] 填报内容为空或 null！生成 0.01 元诊断明细！", $customFieldBizCode);
-                insert(new AllowanceResult(consumeDate, consumeDate, $feeCode, new BigDecimal("0.01"), ccy, colCcy));
+                logger.warn("未读取到天数字段值 [{}] 或填报为空，跳过本次补贴生成", $customFieldBizCode);
                 return;
             }
 
             BigDecimal days = BigDecimal.ZERO;
             try {
                 days = new BigDecimal(daysStr.trim());
-                logger.info("🔢 [DEBUG STEP 1 解析成功] 天数解析为有效数值: {}", days);
-            } catch (Exception parseEx) {
-                logger.error("🚨 [中断代码 0.02] 天数字段内容 [{}] 无法解析为数值！生成 0.02 元诊断明细！报错详情: {}", daysStr, parseEx.getMessage());
-                insert(new AllowanceResult(consumeDate, consumeDate, $feeCode, new BigDecimal("0.02"), ccy, colCcy));
+            } catch (Exception e) {
+                logger.error("天数字段内容 [{}] 无法转换/解析为有效数值，跳过计算", daysStr);
                 return;
             }
 
             if (days.compareTo(BigDecimal.ZERO) <= 0) {
-                logger.warn("⚠️ [中断代码 0.03] 填报天数 {} <= 0！生成 0.03 元诊断明细！", days);
-                insert(new AllowanceResult(consumeDate, consumeDate, $feeCode, new BigDecimal("0.03"), ccy, colCcy));
+                logger.info("表单填写天数 {} <= 0，不发放津贴", days);
                 return;
             }
 
             // ----------------------------------------------------
-            // 步骤 2：统计本次单据的总计费人数 (默认 1 位报销人本人 + 同行人)
+            // 步骤 2：统计本次单据的总计费人数 (默认包含报销人本人 = 1人)
             // ----------------------------------------------------
-            logger.info("👥 [DEBUG STEP 2] 开始统计参与计算总人数 (默认包含报销人本人 = 1人)...");
             long personCount = 1L;
 
             if ($travelPartnerInfo != null) {
@@ -127,11 +111,10 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
                     personCount += $travelPartnerInfo.getExternalTravelPartner().size();
                 }
             }
-            logger.info("🎯 [DEBUG STEP 2 结论] 最终核定补贴计算人数 (报销人+参与人) = {} 人", personCount);
+            logger.info("本次报销单最终计费参与人总数 (报销人+同行参与人) = {} 人", personCount);
 
             if (personCount <= 0L) {
-                logger.warn("⚠️ [中断代码 0.04] 核定计算总人数 {} <= 0！生成 0.04 元诊断明细！", personCount);
-                insert(new AllowanceResult(consumeDate, consumeDate, $feeCode, new BigDecimal("0.04"), ccy, colCcy));
+                logger.warn("计费总人数 {} <= 0，跳过生成", personCount);
                 return;
             }
 
@@ -140,17 +123,20 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
             // ----------------------------------------------------
             BigDecimal totalPeople = new BigDecimal(personCount);
             BigDecimal totalAmount = days.multiply(totalPeople).multiply($dailyRatePerPerson).setScale(2, BigDecimal.ROUND_HALF_UP);
-            logger.info("🧮 [DEBUG STEP 3 正常结果] 整单补贴总金额计算完毕: {}天 * {}人 * {}元 = {} 元", days, personCount, $dailyRatePerPerson, totalAmount);
+            logger.info("整单津贴计算: {}天 * {}人 * {}元/天/人 = {}元", days, totalPeople, $dailyRatePerPerson, totalAmount);
 
             if (totalAmount.compareTo(BigDecimal.ZERO) <= 0) {
-                logger.warn("⚠️ [中断代码 0.04] 计算所得金额 <= 0！生成 0.04 元诊断明细！");
-                insert(new AllowanceResult(consumeDate, consumeDate, $feeCode, new BigDecimal("0.04"), ccy, colCcy));
+                logger.warn("计算所得整单津贴总额 {} <= 0，不生成明细行", totalAmount);
                 return;
             }
 
             // ----------------------------------------------------
-            // 步骤 4：构造并插入正常津贴 AllowanceResult 对象
+            // 步骤 4：构造整单唯一的 AllowanceResult 并插入内存 (报销单独立明细行)
             // ----------------------------------------------------
+            DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
+            String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
+            String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
+
             AllowanceResult result = new AllowanceResult(
                 consumeDate,
                 consumeDate,
@@ -161,16 +147,10 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
             );
 
             insert(result);
-            logger.info("🎉 [执行成功] 整笔补贴明细已成功生成！feecode={}, 金额={}元, 天数={}, 总计费人数={}", $feeCode, totalAmount, days, personCount);
-            logger.info("==================================================");
+            logger.info("🎉 成功生成并插入整单合并补贴 (纯报销单独立行): feecode={}, 总金额={}元, 天数={}, 总人数={}", $feeCode, totalAmount, days, personCount);
 
         } catch (Throwable t) {
-            logger.error("🚨🚨🚨 [严重错误-抛出未捕获异常] 生成 0.99 元诊断报错明细！🚨🚨🚨");
-            logger.error("异常类型: {}, 提示: {}", t.getClass().getName(), t.getMessage(), t);
-            DateTime errDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
-            String errCcy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
-            insert(new AllowanceResult(errDate, errDate, $feeCode, new BigDecimal("0.99"), errCcy, errCcy));
-            logger.info("==================================================");
+            logger.error("补贴规则执行过程发生未捕获异常: {}", t.getMessage(), t);
         }
 end
 ```

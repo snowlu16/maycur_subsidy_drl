@@ -95,10 +95,11 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         }
 
         // ----------------------------------------------------
-        // 步骤 2：统计本次出差总人数 (报销人自身 + 同行参与人)
+        // 步骤 2：统计本次单据的总计费人数 (默认包含 1 位报销人本人 + 同行人)
         // ----------------------------------------------------
         long personCount = 1L;
 
+        // 直接从单据表头提取同行参与人列表
         if ($travelPartnerInfo != null) {
             if ($travelPartnerInfo.getInternalTravelPartner() != null) {
                 personCount += $travelPartnerInfo.getInternalTravelPartner().size();
@@ -107,6 +108,7 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
                 personCount += $travelPartnerInfo.getExternalTravelPartner().size();
             }
         } else if ($travelRoutes != null && !$travelRoutes.isEmpty()) {
+            // 兼容兜底：如果有些单据没有表头参与人但带有行程，尝试从首段行程上获取
             for (Object obj : $travelRoutes) {
                 TravelRoute routeObj = (TravelRoute) obj;
                 if (routeObj != null && routeObj.getTravelPartnerInfo() != null) {
@@ -120,23 +122,30 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
                 }
             }
         }
-        logger.info("本次出差合计计算人数(报销人+同行人)为: {} 人", personCount);
+        logger.info("本次报销单合计补贴计算人数（报销人+同行参与人）为: {} 人", personCount);
+
+        if (personCount <= 0L) {
+            logger.warn("计费人数小于等于0，跳过生成");
+            return;
+        }
 
         // ----------------------------------------------------
-        // 步骤 3：计算最终整单补贴总金额 = 天数 * 总人数 * 单人单日标准 (50元)
+        // 步骤 3：计算整单唯一补贴总金额 = 天数 * 总人数 * 单人单日标准 (50元)
         // ----------------------------------------------------
         BigDecimal totalPeople = new BigDecimal(personCount);
         BigDecimal totalAmount = days.multiply(totalPeople).multiply($dailyRatePerPerson).setScale(2, BigDecimal.ROUND_HALF_UP);
-        logger.info("计算总补贴: {}天 * {}人 * {}元/天/人 = {}", days, totalPeople, $dailyRatePerPerson, totalAmount);
+        logger.info("整单津贴计算: {}天 * {}人 * {}元/天/人 = {}元", days, totalPeople, $dailyRatePerPerson, totalAmount);
 
         // ----------------------------------------------------
-        // 步骤 4：确定时间区间与行程挂靠
+        // 步骤 4：确定起止时间与明细行归属（专为无行程信息的报销单优化）
         // ----------------------------------------------------
+        // 针对没有关联差旅行程信息的报销单，直接取单据最近提交时间作为消费时间；若无则取系统当前时间
         DateTime startDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
         DateTime endDate = startDate;
         String travelRouteCode = null;
         String consumeLocation = null;
 
+        // 若单据中存在关联行程信息，自动挂靠行程并修正首尾起止时间；若无行程信息，则保持原样直接生成独立行
         if ($travelRoutes != null && !$travelRoutes.isEmpty()) {
             TravelRoute firstRoute = (TravelRoute) $travelRoutes.get(0);
             TravelRoute lastRoute = (TravelRoute) $travelRoutes.get($travelRoutes.size() - 1);
@@ -163,7 +172,7 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
                 $collectionCcy
             );
 
-            // 若申请单/报销单带有行程，必须挂靠行程 Code 否则前端明细行不渲染显示
+            // 如果有行程则绑定行程归属 Code；如果是“无行程信息的报销单”，此处不会执行，直接生成顶层独立补贴明细行！
             if (travelRouteCode != null && !travelRouteCode.isEmpty()) {
                 result.setTravelRouteCode(travelRouteCode);
             }
@@ -172,7 +181,7 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
             }
 
             insert(result);
-            logger.info("🎉 成功插入整笔合并补贴: 费用编码={}, 合计金额={}, 挂靠行程={}", $feeCode, totalAmount, travelRouteCode);
+            logger.info("🎉 成功生成整单合并补贴 (无行程兼容版): feecode={}, 总计金额={}元, 关联天数={}, 总人数={}", $feeCode, totalAmount, days, personCount);
         }
 end
 ```

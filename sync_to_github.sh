@@ -37,6 +37,7 @@ fi
 ZIP_NAME="maycur_subsidy_drl.zip"
 echo "${YELLOW}📦 正在自动打包生成最新的 $ZIP_NAME (排除 .git 及日志等)...${NC}"
 PARENT_DIR="${SKILL_DIR:h}"
+rm -f "$SKILL_DIR/$ZIP_NAME" "/Users/snowlu16/Documents/每刻交付/补贴脚本开发/$ZIP_NAME" 2>/dev/null
 (
     cd "$PARENT_DIR" || exit 1
     # 安静且高压缩比打包 maycur_subsidy_drl 文件夹

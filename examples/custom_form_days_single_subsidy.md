@@ -102,8 +102,8 @@ rule "根据表单自定义天数计算整单补贴"
 
         // 如果单据中存在关联的行程列表，取首尾行程的时间区间与目的地，并自动挂靠在第一段行程下（适配需要挂靠行程显示的单据配置）
         if ($travelRoutes != null && !$travelRoutes.isEmpty()) {
-            TravelRoute firstRoute = (TravelRoute) $travelRoutes.get(0);
-            TravelRoute lastRoute = (TravelRoute) $travelRoutes.get($travelRoutes.size() - 1);
+            Object firstRoute = $travelRoutes.get(0);
+            Object lastRoute = $travelRoutes.get($travelRoutes.size() - 1);
             if (firstRoute.getStartDate() != null) {
                 startDate = firstRoute.getStartDate();
             }

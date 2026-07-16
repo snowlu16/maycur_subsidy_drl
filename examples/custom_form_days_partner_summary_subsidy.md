@@ -99,22 +99,26 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         // ----------------------------------------------------
         long personCount = 1; // 默认包含报销人自己 (1 人)
 
-        // 获取参与人信息对象（优先自单据头部获取，若头部无则自首段行程获取）
-        TravelPartnerInfo partnerInfo = $travelPartnerInfo;
-        if (partnerInfo == null && $travelRoutes != null && !$travelRoutes.isEmpty()) {
-            partnerInfo = ((TravelRoute) $travelRoutes.get(0)).getTravelPartnerInfo();
-        }
-
-        if (partnerInfo != null) {
-            // 统计内部同行人数量
-            if (partnerInfo.getInternalTravelPartner != null) {
-                personCount += partnerInfo.getInternalTravelPartner.size();
-                logger.info("统计到内部同行参与人 {} 人", partnerInfo.getInternalTravelPartner.size());
+        // 优先自单据头部获取参与人列表
+        if ($travelPartnerInfo != null) {
+            if ($travelPartnerInfo.getInternalTravelPartner() != null) {
+                personCount += $travelPartnerInfo.getInternalTravelPartner().size();
             }
-            // 统计外部同行人数量
-            if (partnerInfo.getExternalTravelPartner != null) {
-                personCount += partnerInfo.getExternalTravelPartner.size();
-                logger.info("统计到外部同行参与人 {} 人", partnerInfo.getExternalTravelPartner.size());
+            if ($travelPartnerInfo.getExternalTravelPartner() != null) {
+                personCount += $travelPartnerInfo.getExternalTravelPartner().size();
+            }
+        } else if ($travelRoutes != null && !$travelRoutes.isEmpty()) {
+            // 若表头没有参与人，从首段行程上获取（使用 Mvel 动态遍历避免强转语法异常）
+            for (Object routeObj : $travelRoutes) {
+                if (routeObj != null && routeObj.getTravelPartnerInfo() != null) {
+                    if (routeObj.getTravelPartnerInfo().getInternalTravelPartner() != null) {
+                        personCount += routeObj.getTravelPartnerInfo().getInternalTravelPartner().size();
+                    }
+                    if (routeObj.getTravelPartnerInfo().getExternalTravelPartner() != null) {
+                        personCount += routeObj.getTravelPartnerInfo().getExternalTravelPartner().size();
+                    }
+                    break;
+                }
             }
         }
         logger.info("本次出差合计计算人数(报销人+同行人)为: {} 人", personCount);
@@ -127,7 +131,7 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         logger.info("计算总补贴: {}天 * {}人 * {}元/天/人 = {}", days, totalPeople, $dailyRatePerPerson, totalAmount);
 
         // ----------------------------------------------------
-        // 步骤 4：确定时间区间与行程挂靠
+        // 步骤 4：确定时间区间与行程挂靠（使用 Mvel 动态属性解析避免强转语法异常）
         // ----------------------------------------------------
         DateTime startDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
         DateTime endDate = startDate;
@@ -135,8 +139,8 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         String consumeLocation = null;
 
         if ($travelRoutes != null && !$travelRoutes.isEmpty()) {
-            TravelRoute firstRoute = (TravelRoute) $travelRoutes.get(0);
-            TravelRoute lastRoute = (TravelRoute) $travelRoutes.get($travelRoutes.size() - 1);
+            Object firstRoute = $travelRoutes.get(0);
+            Object lastRoute = $travelRoutes.get($travelRoutes.size() - 1);
             if (firstRoute.getStartDate() != null) {
                 startDate = firstRoute.getStartDate();
             }

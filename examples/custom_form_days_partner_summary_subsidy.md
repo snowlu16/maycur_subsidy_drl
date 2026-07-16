@@ -79,10 +79,21 @@ rule "按照表单自定义天数与同行参与人数汇总计算补贴"
             // 步骤 4：构造整单唯一补贴对象 AllowanceResult 并插入
             // ----------------------------------------------------
             DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
+            if (consumeDate == null && $reimburse.getExpenses() != null && !$reimburse.getExpenses().isEmpty()) {
+                consumeDate = $reimburse.getExpenses().get(0).getConsumeDate();
+            }
+            if (consumeDate == null) consumeDate = DateTime.now();
+
             String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
             String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
 
-            insert(new AllowanceResult(consumeDate, consumeDate, "32", totalAmount, ccy, colCcy));
+            // 核心修复：同时赋满 date、startDate、endDate 三个时间字段，彻底解决前端“费用消费日期为空”的问题
+            AllowanceResult result = new AllowanceResult(consumeDate, "32", totalAmount, ccy, colCcy);
+            result.setDate(consumeDate);
+            result.setStartDate(consumeDate);
+            result.setEndDate(consumeDate);
+
+            insert(result);
             logger.info("🎉 报销单整单补贴生成成功: feecode=32, {}天 * {}人 * 50元 = {}元", days, personCount, totalAmount);
 
         } catch (Throwable t) {

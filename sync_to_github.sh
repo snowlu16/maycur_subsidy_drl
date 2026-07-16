@@ -33,7 +33,25 @@ if [[ $? -ne 0 ]]; then
     echo "${YELLOW}⚠️ 注意: 拉取远程变更遇到提示或暂无关联更新，继续执行后续步骤...${NC}"
 fi
 
-# 5. 检查本地是否有新增、修改或未提交的文件
+# 5. 自动打包当前技能目录为 zip 文件（供上传 SkillHub 或分发）
+ZIP_NAME="maycur_subsidy_drl.zip"
+echo "${YELLOW}📦 正在自动打包生成最新的 $ZIP_NAME (排除 .git 及日志等)...${NC}"
+PARENT_DIR="${SKILL_DIR:h}"
+(
+    cd "$PARENT_DIR" || exit 1
+    # 安静且高压缩比打包 maycur_subsidy_drl 文件夹
+    zip -q -r -9 "$SKILL_DIR/$ZIP_NAME" "maycur_subsidy_drl" -x "*/.git/*" "*/.DS_Store*" "*/.*.log" "*$ZIP_NAME*"
+    # 同时复制一份到工作区根目录下方便随手获取
+    cp -f "$SKILL_DIR/$ZIP_NAME" "/Users/snowlu16/Documents/每刻交付/补贴脚本开发/$ZIP_NAME" 2>/dev/null
+)
+if [[ -f "$SKILL_DIR/$ZIP_NAME" ]]; then
+    ZIP_SIZE=$(du -h "$SKILL_DIR/$ZIP_NAME" | cut -f1 | tr -d ' ')
+    echo "${GREEN}🎁 打包成功！ZIP 压缩包路径 (文件大小: $ZIP_SIZE)：${NC}"
+    echo "${CYAN}   1️⃣  $SKILL_DIR/$ZIP_NAME${NC}"
+    echo "${CYAN}   2️⃣  /Users/snowlu16/Documents/每刻交付/补贴脚本开发/$ZIP_NAME${NC}"
+fi
+
+# 6. 检查本地是否有新增、修改或未提交的文件
 MODIFIED_FILES=$(git status --porcelain)
 if [[ -n "$MODIFIED_FILES" ]]; then
     echo "${YELLOW}⚡ 检测到本地技能文件有修改或新增：${NC}"

@@ -10,3 +10,6 @@ Thumbs.db
 # Logs & temp
 *.log
 *.tmp
+
+# Skill bundles (generated automatically for SkillHub)
+*.zip

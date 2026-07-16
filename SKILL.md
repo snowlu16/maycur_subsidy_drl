@@ -260,10 +260,10 @@ rule "国外补贴规则"
 
 ---
 
-## 七、 完整真实模板索引（共 45 个全场景官方完整 .drl 脚本库）
+## 七、 完整真实模板索引（共 46 个全场景官方完整 .md 脚本库）
 
 > [!TIP]
-> 本技能库已将每刻官方所有补贴场景（半天 `1.1`~`1.13` 系列，全天 `2.1`~`2.19` 系列，以及自定义表单/自驾车扩展模板）**共计 45 个完整 `.drl` 脚本**统一整理存放在 `examples/` 目录下！
+> 本技能库已将每刻官方所有补贴场景（半天 `1.1`~`1.13` 系列，全天 `2.1`~`2.19` 系列，以及自定义表单/自驾车扩展模板）**共计 46 个完整 `.md` 脚本**统一整理存放在 `examples/` 目录下！
 > 请直接访问 👉 **[每刻官方全场景与完整源码速查链接总表 (usg5m5_templates.md)](file:///references/usg5m5_templates.md)** 即可一键跳转任意场景源码！以下仅列出 10 个最核心的高频精选模板：
 
 ### 半天（12:00 分界）精选核心系列
@@ -283,6 +283,7 @@ rule "国外补贴规则"
 | [real_2.5_含报销人和参与人_全天_行程汇总_费用折半](file:///examples/real_2.5_含报销人和参与人_全天_行程汇总_费用折半.md) | 有关联费用时对应日期折半 | `dateList`+`ratio` 参数 |
 | [real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准](file:///examples/real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准.md) | 国内/国外分别不同 bizCode | `destination.contains("domestic"/"abroad")` |
 | [real_2.15_仅报销人_行程天数判断扣减](file:///examples/real_2.15_仅报销人_行程天数判断扣减.md) | 多行程连续性判断扣减（复杂版） | 排序+`isContinuousDates`+`nextFirst` |
+| [custom_form_days_partner_summary_subsidy](file:///examples/custom_form_days_partner_summary_subsidy.md) | 表单自定义天数 + 同行人汇总计算整单 | `allowanceService.getCustomFormValue` + `personCount` |
 
 ---
 

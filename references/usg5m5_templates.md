@@ -55,6 +55,6 @@
 | 场景分类 | 功能说明 | 完整源码直接查看 |
 | :--- | :--- | :--- |
 | **自驾车计算** | 根据出差里程与自驾车表单动态核算自驾补贴额度 | [expense_based_subsidy.md](file:///examples/expense_based_subsidy.md) |
-| **自定义表单补贴** | 不挂行程，仅依据单据上自定义字段数字/下拉选项发钱 | [custom_form_subsidy.md](file:///examples/custom_form_subsidy.md) \| [按天数版](file:///examples/custom_form_days_single_subsidy.md) |
+| **自定义表单补贴** | 不挂行程/结合单据表头自定义字段与同行参与人数发钱 | [custom_form_subsidy.md](file:///examples/custom_form_subsidy.md) \| [按天数单人版](file:///examples/custom_form_days_single_subsidy.md) \| [按天数+同行人整单汇总版](file:///examples/custom_form_days_partner_summary_subsidy.md) |
 | **标准基础按天模板** | 官方建议的基础按天迭代模板代码 | [standard_daily_subsidy.md](file:///examples/standard_daily_subsidy.md) |
 | **标准基础行程模板** | 官方建议的基础按行程区间迭代模板代码 | [standard_trip_subsidy.md](file:///examples/standard_trip_subsidy.md) |

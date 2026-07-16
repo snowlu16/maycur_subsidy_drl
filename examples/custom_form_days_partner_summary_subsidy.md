@@ -78,23 +78,30 @@ rule "按照表单自定义天数与同行参与人数汇总计算补贴"
             // ----------------------------------------------------
             // 步骤 4：构造整单唯一补贴对象 AllowanceResult 并插入
             // ----------------------------------------------------
-            DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
+            DateTime consumeDate = ($submittedAt != null) ? $submittedAt : null;
             if (consumeDate == null && $reimburse.getExpenses() != null && !$reimburse.getExpenses().isEmpty()) {
                 consumeDate = $reimburse.getExpenses().get(0).getConsumeDate();
             }
-            if (consumeDate == null) consumeDate = DateTime.now();
+            if (consumeDate == null) {
+                consumeDate = DateTime.now();
+            }
+            // 核心修复1：将时间严格规整为当天的 00:00:00.000（消除时分秒毫秒导致前端表格日期解析空白或转化失败）
+            consumeDate = consumeDate.withTimeAtStartOfDay();
 
             String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
             String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
 
-            // 核心修复：同时赋满 date、startDate、endDate 三个时间字段，彻底解决前端“费用消费日期为空”的问题
+            // 核心修复2：优先使用单日构造函数（对应 constructor 1），并补齐所有区间和单点时间属性
             AllowanceResult result = new AllowanceResult(consumeDate, "32", totalAmount, ccy, colCcy);
             result.setDate(consumeDate);
             result.setStartDate(consumeDate);
             result.setEndDate(consumeDate);
+            // 核心修复3：兼容防守，通过反射试图写入可能隐藏或不同版本的 consumeDate / consumeTime 字段
+            try { result.getClass().getMethod("setConsumeDate", DateTime.class).invoke(result, consumeDate); } catch (Throwable ignore) {}
+            try { result.getClass().getMethod("setConsumeTime", DateTime.class).invoke(result, consumeDate); } catch (Throwable ignore) {}
 
             insert(result);
-            logger.info("🎉 报销单整单补贴生成成功: feecode=32, {}天 * {}人 * 50元 = {}元", days, personCount, totalAmount);
+            logger.info("🎉 报销单整单补贴生成成功: feecode=32, {}天 * {}人 * 50元 = {}元, 消费日期={}", days, personCount, totalAmount, consumeDate.toString("yyyy-MM-dd"));
 
         } catch (Throwable t) {
             logger.error("执行过程发生未捕获异常: {}", t.getMessage(), t);

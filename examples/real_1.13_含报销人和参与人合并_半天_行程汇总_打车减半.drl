@@ -1,0 +1,435 @@
+package rules;
+
+import java.util.*;
+import java.math.BigDecimal;
+
+import com.maycur.sdk.rule.domain.*;
+import com.maycur.sdk.rule.domain.result.*;
+import com.maycur.sdk.rule.service.*;
+import org.joda.time.Days;
+import org.joda.time.DateTime;
+import org.joda.time.format.DateTimeFormat;
+import org.slf4j.Logger;
+
+global AllowanceService allowanceService;
+global Logger logger;
+
+dialect  "mvel"
+
+/*
+	判断行程日期是否半天或重叠
+    @param map 存入多个用户的行程日期集合
+    @param userCode 内部员工编码
+    @param day 行程某天的日期
+    @param startDate 行程出发日期
+    @param endDate 行程返回日期
+    @return none表示重叠,am表示上午,pm表示下午,all表示全天
+ */
+function String isDayHalveOrOverlap(Map map, String userCode, String date, DateTime startDate, DateTime endDate) {
+    // 存储日期列表
+    List days = null;
+    // 判断当前用户是否存有日期列表
+    if(map.get(userCode) == null) {
+        days = new ArrayList();
+    } else {
+        days = (List)map.get(userCode);
+    }
+    // 判断是否是行程的出发时间
+	if(date.equals(startDate.toString("yyyy-MM-dd"))) {
+		// 出发时间在12点后(含)，当天为半天
+		if(startDate.getHourOfDay() >= 12) {
+			// 判断下午的日期是否存在于日期列表中
+            if(days.contains(date + "pm")) {
+            	return "none";
+            }
+            days.add(date + "pm");
+            map.put(userCode, days);
+			return "pm";
+		}
+	}
+    // 判断是否是行程的返回时间
+    if(date.equals(endDate.toString("yyyy-MM-dd"))) {
+		// 返回时间12点前，当天为半天
+		if(endDate.getHourOfDay() < 12) {
+			// 判断上午的日期是否存在于日期列表中
+            if(days.contains(date + "am")) {
+            	return "none";
+            }
+            days.add(date + "am");
+            map.put(userCode, days);
+			return "am";
+		// 返回时间(含)12点，当天为半天
+		} else if (endDate.getHourOfDay() == 12 
+			&& endDate.getMinuteOfHour() == 0) {
+			// 判断上午的日期是否存在于日期列表中
+            if(days.contains(date + "am")) {
+            	return "none";
+            }
+            days.add(date + "am");
+            map.put(userCode, days);
+			return "am";
+		}
+	}
+    // 标识符
+    String flag = "all";
+    // 判断上午的日期是否存在于日期列表中
+    if(days.contains(date + "am")) {
+        flag = "pm";
+    } else {
+        days.add(date + "am");
+    }
+    // 判断下午的日期是否存在于日期列表中
+    if(days.contains(date + "pm")) {
+        if("all".equals(flag)) {
+            flag = "am";
+        } else {
+            flag = "none";
+        }
+    } else {
+        days.add(date + "pm");
+    }
+	map.put(userCode, days);
+    return flag;
+}
+
+/**
+* 处理费用类型的消费日期
+* @param dateList 存储日期列表
+* @param dateTime 当前消费日期
+* @param startDate 消费开始日期
+* @param endDate 消费结束日期
+*/
+function void expenseDate(List dateList, DateTime dateTime, DateTime startDate, DateTime endDate) {
+    // 设置时间
+    String day = dateTime.toString("yyyy-MM-dd");
+
+    // 比较时间大小
+    if(endDate.isBefore(startDate)) {
+
+        // 判断时间12点之后
+        if(dateTime.getHourOfDay() >= 12) {
+            day = day + "pm";
+        } else {
+            day = day + "am";
+        }
+        dateList.add(day);
+        
+    } else {
+
+        // 判断费用的开始时间
+        if(dateTime.withTimeAtStartOfDay().isEqual(startDate.withTimeAtStartOfDay())) {
+            // 判断时间12点之后
+            if(startDate.getHourOfDay() >= 12) {
+                day = day + "pm";
+                dateList.add(day);
+                return;
+            }
+        }
+        // 判断费用的结束时间
+        if(dateTime.withTimeAtStartOfDay().isEqual(endDate.withTimeAtStartOfDay())) {
+            // 返回时间12点前，当天为半天
+            if(endDate.getHourOfDay() < 12) {
+                day = day + "am";
+                dateList.add(day);
+                return;
+            // 返回时间(含)12点，当天为半天
+            } else if (endDate.getHourOfDay() == 12 
+                && endDate.getMinuteOfHour() == 0) {
+                day = day + "am";
+                dateList.add(day);
+                return;
+            }
+        }
+        String amDay = day + "am";
+        dateList.add(amDay);
+        String pmDay = day + "pm";
+        dateList.add(pmDay);
+
+    }
+
+}
+
+// 创建全局参数
+declare TravelHalfDayKeys
+	dateMap : Map // 存储日期集合
+    dateList: List // 存储费用日期列表 
+	bizCode : String // 标准补贴编码
+	feeCode : String // 费用类型编码
+    ratio : BigDecimal // 减扣比率
+end
+
+rule "初始化参数"
+    salience 30
+    when
+        // 判断是否有单据
+        Reimburse(
+            $expenses:expenses // 费用信息
+        );
+    then
+		String bizCode="footAllowance"; // 设置标准补贴编码
+		String feeCode="12345"; // 设置返回费用类型编码
+        String typeBizCode="2020_01"; // 设置初始费用类型编码
+        BigDecimal ratio = BigDecimal.valueOf(0.5); // 减扣比率
+        boolean consumeDateType=true; // 设置消费时间类型 true-时间，false-时间段
+        List dateList = new ArrayList(); //创建费用日期列表
+
+        /**循环费用信息 */
+        for(Expense expense : $expenses) {
+
+            /**获取对应的费用信息 */
+            if(typeBizCode.equals(expense.getTypeBizCode())) {
+
+                /**判断是否有消费日期 */
+                if(consumeDateType) {
+                    
+                    /**将日期添加道日期列表中 */
+                    expenseDate(dateList, expense.getConsumeDate(), expense.getStartDate(), expense.getEndDate());
+
+                } else {
+                    
+                    /**根据费用的开始结束时间计算出差天数 */
+                    List dateTimes = allowanceService.getTripDiffDays(expense);
+
+                    /**循环费用里的日期 */
+                    for(Object obj : dateTimes) {
+
+                        /**转换成日期对象 */
+                        DateTime dateTime = (DateTime)obj;
+
+                        /**将日期添加道日期列表中 */
+                        expenseDate(dateList, dateTime, expense.getStartDate(), expense.getEndDate());
+
+                    }
+
+                }
+
+            }
+            
+        }
+
+        insert(new TravelHalfDayKeys(new HashMap(), dateList, bizCode, feeCode, ratio));
+end
+
+rule "报销人和参与人行程费用规则计算"
+    salience 10
+    when
+        // 获取变量参数
+        TravelHalfDayKeys(
+            $dateMap:dateMap, // 获取日期集合
+            $dateList:dateList, //获取费用日期列表
+            $bizCode:bizCode, // 获取准补贴编码
+            $feeCode:feeCode, // 获取费用类型编码
+            $ratio:ratio // 获取减扣比率
+        );
+        // 获取单据
+        Reimburse(
+            $travelRoutes:travelRoutes, // 行程信息
+            $reimEmployee:reimEmployee, // 报销人信息
+            $collectionCcy:collectionCcy, // 收款币种
+            $baseCcy:baseCcy // 本币
+        );
+        // 获取行程信息
+        $travelRecord : TravelRoute(
+            $startDate:startDate, // 行程出发时间
+            $endDate:endDate, // 行程返回时间
+            $destination:destination, // 行程目的地
+            $allowanceStandardInfos:allowanceStandardInfos, // 报销人补贴标准信息
+            $travelPartnerInfo:travelPartnerInfo, // 参与人信息
+            $partnerAllowanceStandardInfos:partnerAllowanceStandardInfos // 参与人补贴标准信息
+        ) from $travelRoutes;
+        // 获取补贴信息
+		$allowanceStandardInfo : AllowanceStandardInfo(
+			$bizCode.equals(ruleBizCode) // 补贴标准编码
+		) from $allowanceStandardInfos;
+		// 获取补贴标准集合
+		$standardMap : Map(
+			get($bizCode + "DESTINATION") != null
+		) from $allowanceStandardInfo.getStandardMap();
+    then
+
+        logger.info("补贴费用日期列表为" + $dateList);
+
+        /**设置补贴总金额 */
+		BigDecimal amount = BigDecimal.ZERO;
+
+        /**获取根据行程的开始结束时间计算出差天数**/
+        List dateTimes = allowanceService.getTripDiffDays($travelRecord);
+
+        /**循环出差天数 */
+        for(Object obj : dateTimes) {
+            
+            /**转换成日期对象 */
+            DateTime dateTime = (DateTime)obj;
+
+            String date = dateTime.toString("yyyy-MM-dd");
+
+            /**====== 计算报销人补贴金额 ======*/
+            /**获取报销人补贴金额 */
+            BigDecimal allowanceAmount = allowanceService.getDestinationAllowanceStandard(
+                dateTime, 
+                $allowanceStandardInfo
+            );
+
+            /** 获取行程中的时间是否有半天或重叠 */
+            String state = isDayHalveOrOverlap(
+                $dateMap, 
+                $reimEmployee.getUserCode(), 
+                date, 
+                $startDate, 
+                $endDate
+            );
+
+            logger.info("补贴报销人行程日期为" + dateTime + ",补贴报销人编号为" + $reimEmployee.getUserCode() + ",补贴日期判断状态为" + state);
+
+            allowanceAmount = allowanceAmount.divide(BigDecimal.valueOf(2));
+            
+            /** 判断是否为整天 */
+            if("all".equals(state)) {
+
+                if($dateList.contains(date + "am")) {
+                    
+                    amount = amount.add(allowanceAmount.multiply($ratio));
+
+                } else {
+                    
+                    amount = amount.add(allowanceAmount);
+
+                }
+
+                if($dateList.contains(date + "pm")) {
+                    
+                    amount = amount.add(allowanceAmount.multiply($ratio));
+
+                } else {
+
+                    amount = amount.add(allowanceAmount);
+
+                }
+                
+            /** 判断是否为上半天 */
+            } else if ("am".equals(state)) {
+
+                if($dateList.contains(date + "am")) {
+                    
+                    amount = amount.add(allowanceAmount.multiply($ratio));
+ 
+                } else {
+
+                    amount = amount.add(allowanceAmount);
+
+                }
+
+            /** 判断是否为下半天 */
+            } else if ("pm".equals(state)) {
+
+                if($dateList.contains(date + "pm")) {
+                    
+                    amount = amount.add(allowanceAmount.multiply($ratio));
+
+                } else {
+
+                    amount = amount.add(allowanceAmount);
+
+                }
+
+            }
+
+            /**====== 计算参与人补贴金额 ======*/
+            /**判断是否有参与人 */
+            if($travelPartnerInfo != null) {
+
+                /**循环参与人信息列表 */
+                for(TravelPartner travelPartner : $travelPartnerInfo.getInternalTravelPartner) {
+
+                    /**获取补贴标准金额 */
+                    BigDecimal partnerAllowanceAmount = allowanceService.getDestinationPartnerAllowanceStandard(
+                        dateTime,
+                        $partnerAllowanceStandardInfos,
+                        travelPartner,
+                        $bizCode
+                    );
+
+                    /** 获取行程中的时间是否有半天或重叠 */
+                    String state = isDayHalveOrOverlap(
+                        $dateMap, 
+                        travelPartner.getUserCode(), 
+                        date, 
+                        $startDate, 
+                        $endDate
+                    );
+
+                    logger.info("补贴参与人行程日期为" + dateTime +",补贴参与人编号为" + travelPartner.getUserCode() + ",补贴日期判断状态为" + state + ",补贴标准金额为" + partnerAllowanceAmount);
+
+                    partnerAllowanceAmount = partnerAllowanceAmount.divide(BigDecimal.valueOf(2));
+
+                    /** 判断是否为整天 */
+                    if("all".equals(state)) {
+
+                        if($dateList.contains(date + "am")) {
+                            
+                            amount = amount.add(partnerAllowanceAmount.multiply($ratio));
+
+                        } else {
+
+                            amount = amount.add(partnerAllowanceAmount);
+
+                        }
+
+                        if($dateList.contains(date + "pm")) {
+                            
+                            amount = amount.add(partnerAllowanceAmount.multiply($ratio));
+
+                        } else {
+
+                            amount = amount.add(partnerAllowanceAmount);
+
+                        }
+                        
+                    /** 判断是否为上半天 */
+                    } else if ("am".equals(state)) {
+
+                        if($dateList.contains(date + "am")) {
+                            
+                            amount = amount.add(partnerAllowanceAmount.multiply($ratio));
+
+                        } else {
+
+                            amount = amount.add(partnerAllowanceAmount);
+
+                        }
+
+                    /** 判断是否为下半天 */
+                    } else if ("pm".equals(state)) {
+
+                        if($dateList.contains(date + "pm")) {
+                            
+                            amount = amount.add(partnerAllowanceAmount.multiply($ratio));
+
+                        } else {
+
+                            amount = amount.add(partnerAllowanceAmount);
+
+                        }
+
+                    }
+
+                }
+
+            }
+
+        }
+
+        /** 判断出差补助是否大于零 */
+        if(amount.compareTo(BigDecimal.ZERO) == 1) {
+
+			/** 获取币种 */
+			String currency = allowanceService.getDestinationAllowanceStandardCcy($startDate, $allowanceStandardInfo);
+            /** 创建返回补贴结果对象 */
+            AllowanceResult allowanceResult = new AllowanceResult($startDate, $endDate, $feeCode, amount, currency, currency);
+            /** 设置消费城市 */
+            allowanceResult.setConsumeLocation($destination);
+			/** 插入返回结果 */
+            insert(allowanceResult);
+
+        }
+end

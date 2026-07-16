@@ -248,6 +248,17 @@ end
   - 转日期字符串：`dateTime.toString("yyyy-MM-dd")`
   - 取小时：`dateTime.getHourOfDay()`
 
+### Q5: 遇到“行程上如果选了【是否派车/职级】自定义选择项则匹配不同补贴金额”，脚本里要怎么写判断？
+* **答案（打破误区）**：**脚本里完全不用写 `customFormValues` 判断！** 
+* **底层原理**：在后台配置“补贴标准”表时，将自定义档案（如【是否派车】）设置为标准的**行维度**并为不同子项录入对应标准。当行程表单上也引用了同一个【是否派车】选择组件时，调用 `getDestinationAllowanceStandard` 底层会自动将当前行程的具体选择项与补贴标准表的行做精确匹配！匹配上即返回标准，未匹配返回 null。
+
+### Q6: 为什么前端提交测试直接报错“生成失败”或无任何明细，且本地反复检查 DRL 语法一点问题也没有？
+* **原因**：这是由于脚本在运行时碰到了底层 Java 运行时异常（Runtime Exception，例如强转对象 ClassCastException、空指针 NullPointerException 或 Joda-Time 日期格式错误）。每刻控制台只会做 Syntax 语法静态检验，运行时异常只会静默返回空或提示失败。
+* **终极排查指南**：**必须查看阿里云 SLS 异常堆栈日志！**
+  1. 获取调用接口 `allowance/generate` 与租户 `entCode` 的本次请求 `traceId`；
+  2. 登录阿里云 SLS 对应集群 Logstore（`ng` 为 `maycur-web_log`，`ng-uat` 为 `ng-uat-log`）；
+  3. 输入过滤查询条件 `<你的traceId> and __topic__ : rule-service`，即可一秒看到报错行号与 Java Error Stack！
+
 ---
 
 ## 四、 进阶学习：全场景真实脚本传送门

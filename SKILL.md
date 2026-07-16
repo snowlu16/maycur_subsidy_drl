@@ -128,7 +128,7 @@ end
 // salience 25 规则先做去重+排序，生成 DateListTravelList 后插入内存
 // salience 20 规则从 DateListTravelList 读取，再做连续行程扣减逻辑
 ```
-参见 [real_2.1_仅报销人_全天_单条行程汇总_行程扣减.drl](file:///examples/real_2.1_仅报销人_全天_单条行程汇总_行程扣减.drl) 完整实现。
+参见 [real_2.1_仅报销人_全天_单条行程汇总_行程扣减.md](file:///examples/real_2.1_仅报销人_全天_单条行程汇总_行程扣减.md) 完整实现。
 
 ---
 
@@ -206,7 +206,7 @@ if($dateList.contains(dateTime.toString("yyyy-MM-dd"))) {
 ```java
 // 在 when 中绑定行程自定义字段（需要判断具体字段值）
 // 在 then 中读取行程的 customFormValues 并比对选项编码
-// 参见 real_2.10_含报销人和参与人_全天_行程选项扣减.drl
+// 参见 real_2.10_含报销人和参与人_全天_行程选项扣减.md
 ```
 
 ### 行程多目的地、考勤工时联动与含早扣减 (官方高阶字段)
@@ -253,7 +253,7 @@ rule "国外补贴规则"
         eval($destination.contains("abroad"));  // 国外判断
         ...
 ```
-参见 [real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准.drl](file:///examples/real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准.drl)。
+参见 [real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准.md](file:///examples/real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准.md)。
 
 ---
 
@@ -266,20 +266,20 @@ rule "国外补贴规则"
 ### 半天（12:00 分界）精选核心系列
 | 文件 | 场景 | 关键特性 |
 | :--- | :--- | :--- |
-| [real_1.1_仅参与人_半天_每人每天一条](file:///examples/real_1.1_仅参与人_半天_每人每天一条.drl) | 仅参与人 / 不汇总 | `isDayHalveOrOverlap` |
-| [real_1.4_含报销人和参与人_半天_每人每天一条](file:///examples/real_1.4_含报销人和参与人_半天_每人每天一条.drl) | **最通用半天模板** / 报销人+参与人各自每天一条 | 双 rule，salience 20+10 |
-| [real_1.5_含报销人和参与人_半天_行程汇总_两套标准](file:///examples/real_1.5_含报销人和参与人_半天_行程汇总_两套标准.drl) | 行程汇总 / 两套 bizCode（userCode+"ONE"/+"TWO"） | 两套标准分别用不同 salience |
-| [real_1.6_含报销人和参与人_半天_按天汇总](file:///examples/real_1.6_含报销人和参与人_半天_按天汇总.drl) | 半天 / 每日所有人合并一条 | 报销人+参与人同一行合并计算 |
-| [real_1.8_常驻地市级匹配为0](file:///examples/real_1.8_常驻地市级匹配为0.drl) | 常驻地匹配 → 金额归零 | `placeFullCode.split("-")[2]` |
+| [real_1.1_仅参与人_半天_每人每天一条](file:///examples/real_1.1_仅参与人_半天_每人每天一条.md) | 仅参与人 / 不汇总 | `isDayHalveOrOverlap` |
+| [real_1.4_含报销人和参与人_半天_每人每天一条](file:///examples/real_1.4_含报销人和参与人_半天_每人每天一条.md) | **最通用半天模板** / 报销人+参与人各自每天一条 | 双 rule，salience 20+10 |
+| [real_1.5_含报销人和参与人_半天_行程汇总_两套标准](file:///examples/real_1.5_含报销人和参与人_半天_行程汇总_两套标准.md) | 行程汇总 / 两套 bizCode（userCode+"ONE"/+"TWO"） | 两套标准分别用不同 salience |
+| [real_1.6_含报销人和参与人_半天_按天汇总](file:///examples/real_1.6_含报销人和参与人_半天_按天汇总.md) | 半天 / 每日所有人合并一条 | 报销人+参与人同一行合并计算 |
+| [real_1.8_常驻地市级匹配为0](file:///examples/real_1.8_常驻地市级匹配为0.md) | 常驻地匹配 → 金额归零 | `placeFullCode.split("-")[2]` |
 
 ### 全天精选核心系列
 | 文件 | 场景 | 关键特性 |
 | :--- | :--- | :--- |
-| [real_2.1_仅报销人_全天_单条行程汇总_行程扣减](file:///examples/real_2.1_仅报销人_全天_单条行程汇总_行程扣减.drl) | 仅报销人 / 行程连续扣减（单天不扣，多天-1，相邻合并） | `DateListTravel`+`DateListTravelList`+`isContinuousDates` |
-| [real_2.4_含报销人和参与人_全天_行程汇总](file:///examples/real_2.4_含报销人和参与人_全天_行程汇总.drl) | **最通用全天模板** / 报销人+参与人合并行程汇总 | `isDayOverlap` |
-| [real_2.5_含报销人和参与人_全天_行程汇总_费用折半](file:///examples/real_2.5_含报销人和参与人_全天_行程汇总_费用折半.drl) | 有关联费用时对应日期折半 | `dateList`+`ratio` 参数 |
-| [real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准](file:///examples/real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准.drl) | 国内/国外分别不同 bizCode | `destination.contains("domestic"/"abroad")` |
-| [real_2.15_仅报销人_行程天数判断扣减](file:///examples/real_2.15_仅报销人_行程天数判断扣减.drl) | 多行程连续性判断扣减（复杂版） | 排序+`isContinuousDates`+`nextFirst` |
+| [real_2.1_仅报销人_全天_单条行程汇总_行程扣减](file:///examples/real_2.1_仅报销人_全天_单条行程汇总_行程扣减.md) | 仅报销人 / 行程连续扣减（单天不扣，多天-1，相邻合并） | `DateListTravel`+`DateListTravelList`+`isContinuousDates` |
+| [real_2.4_含报销人和参与人_全天_行程汇总](file:///examples/real_2.4_含报销人和参与人_全天_行程汇总.md) | **最通用全天模板** / 报销人+参与人合并行程汇总 | `isDayOverlap` |
+| [real_2.5_含报销人和参与人_全天_行程汇总_费用折半](file:///examples/real_2.5_含报销人和参与人_全天_行程汇总_费用折半.md) | 有关联费用时对应日期折半 | `dateList`+`ratio` 参数 |
+| [real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准](file:///examples/real_2.7_含报销人和参与人_全天_行程汇总_国内外两套标准.md) | 国内/国外分别不同 bizCode | `destination.contains("domestic"/"abroad")` |
+| [real_2.15_仅报销人_行程天数判断扣减](file:///examples/real_2.15_仅报销人_行程天数判断扣减.md) | 多行程连续性判断扣减（复杂版） | 排序+`isContinuousDates`+`nextFirst` |
 
 ---
 

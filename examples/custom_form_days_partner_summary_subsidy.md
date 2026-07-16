@@ -23,7 +23,7 @@ import com.maycur.sdk.rule.service.*;
 global AllowanceService allowanceService;
 global Logger logger;
 
-dialect "mvel"
+dialect "java"
 
 // ==========================================
 // 1. 声明全局参数结构体
@@ -97,9 +97,8 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         // ----------------------------------------------------
         // 步骤 2：统计本次出差总人数 (报销人自身 + 同行参与人)
         // ----------------------------------------------------
-        long personCount = 1; // 默认包含报销人自己 (1 人)
+        long personCount = 1L;
 
-        // 优先自单据头部获取参与人列表
         if ($travelPartnerInfo != null) {
             if ($travelPartnerInfo.getInternalTravelPartner() != null) {
                 personCount += $travelPartnerInfo.getInternalTravelPartner().size();
@@ -108,8 +107,8 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
                 personCount += $travelPartnerInfo.getExternalTravelPartner().size();
             }
         } else if ($travelRoutes != null && !$travelRoutes.isEmpty()) {
-            // 若表头没有参与人，从首段行程上获取（使用 Mvel 动态遍历避免强转语法异常）
-            for (Object routeObj : $travelRoutes) {
+            for (Object obj : $travelRoutes) {
+                TravelRoute routeObj = (TravelRoute) obj;
                 if (routeObj != null && routeObj.getTravelPartnerInfo() != null) {
                     if (routeObj.getTravelPartnerInfo().getInternalTravelPartner() != null) {
                         personCount += routeObj.getTravelPartnerInfo().getInternalTravelPartner().size();
@@ -131,7 +130,7 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         logger.info("计算总补贴: {}天 * {}人 * {}元/天/人 = {}", days, totalPeople, $dailyRatePerPerson, totalAmount);
 
         // ----------------------------------------------------
-        // 步骤 4：确定时间区间与行程挂靠（使用 Mvel 动态属性解析避免强转语法异常）
+        // 步骤 4：确定时间区间与行程挂靠
         // ----------------------------------------------------
         DateTime startDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
         DateTime endDate = startDate;
@@ -139,8 +138,8 @@ rule "根据表单自定义天数及同行人数汇总计算整单补贴"
         String consumeLocation = null;
 
         if ($travelRoutes != null && !$travelRoutes.isEmpty()) {
-            Object firstRoute = $travelRoutes.get(0);
-            Object lastRoute = $travelRoutes.get($travelRoutes.size() - 1);
+            TravelRoute firstRoute = (TravelRoute) $travelRoutes.get(0);
+            TravelRoute lastRoute = (TravelRoute) $travelRoutes.get($travelRoutes.size() - 1);
             if (firstRoute.getStartDate() != null) {
                 startDate = firstRoute.getStartDate();
             }

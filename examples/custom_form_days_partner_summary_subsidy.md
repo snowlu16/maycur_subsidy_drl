@@ -78,11 +78,20 @@ rule "按照表单自定义天数与同行参与人数汇总计算补贴"
             // ----------------------------------------------------
             // 步骤 4：构造整单唯一补贴对象 AllowanceResult 并插入
             // ----------------------------------------------------
-            DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
+            DateTime rawDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
+            // 兼容所有 JodaTime 版本的通用归零写法：严格截取年、月、日并构造当天 00:00:00.000
+            // 彻底解决 `.withTimeAtStartOfDay()` 在旧版本兼容性报错的问题，以及时分秒导致前端显示“没有 consumeDate”的问题
+            DateTime consumeDate = new DateTime(rawDate.getYear(), rawDate.getMonthOfYear(), rawDate.getDayOfMonth(), 0, 0, 0, 0);
+
             String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
             String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
 
-            insert(new AllowanceResult(consumeDate, "32", totalAmount, ccy, colCcy));
+            AllowanceResult result = new AllowanceResult(consumeDate, "32", totalAmount, ccy, colCcy);
+            result.setDate(consumeDate);
+            result.setStartDate(consumeDate);
+            result.setEndDate(consumeDate);
+
+            insert(result);
             logger.info("🎉 报销单整单补贴生成成功: feecode=32, {}天 * {}人 * 50元 = {}元, 消费日期={}", days, personCount, totalAmount, consumeDate.toString("yyyy-MM-dd"));
 
         } catch (Throwable t) {

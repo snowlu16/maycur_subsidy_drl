@@ -79,9 +79,6 @@ rule "按照表单自定义天数与同行参与人数汇总计算补贴"
             // 步骤 4：构造整单唯一补贴对象 AllowanceResult 并插入
             // ----------------------------------------------------
             DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
-            // 严格按 年-月-日 (yyyy-MM-dd) 格式化/归一化处理，去除时分秒干扰
-            consumeDate = consumeDate.withTimeAtStartOfDay();
-
             String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
             String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
 

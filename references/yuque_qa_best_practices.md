@@ -111,6 +111,8 @@ String currency = allowanceService.getDestinationAllowanceStandardCcy($startDate
 | **算出来金额全是 0 / 单条费用被跳过** | `1)` 脚本里配置了 `if(amount > 0) insert` 导致金额为0被过滤；<br>`2)` 补贴标准表列维度**没选【城市】**；<br>`3)` 编码 (`bizCode`/`feeCode`) 在产线被改动。 | 确认后台是否选了全部城市列；检查 DRL 日志中 `standardAmount` 打印值。 |
 | **提示补贴“生成成功”，但页面明细区域一片空白** | 申请单设置了“需要在行程下填写申请明细”，但 DRL 没写 `setTravelRouteCode(...)`。 | 在 `then` 中为 `allowanceResult` 补充赋值 `setTravelRouteCode($travelRoute.getCode())`。 |
 | **外币补贴无法生成 (人民币却正常)** | `1)` 系统未开通/配置多币种与汇率模块；<br>`2)` 补贴标准内的城市没有包含该海外目的城市。 | 检查多币种开通状态及外币城市标准覆盖范围。 |
+| **点击测试/计算补贴，没有任何反应/提示空/根本没进入日志** | 报销单属于无行程纯自定义补贴单据，且**既没有行程 (`TravelRoute`为空)，也没有任何现有费用明细 (`Expense`为空)**。底层引擎默认此单据无差旅/无实体消费，直接判定不进入执行规则。 | 在报销单明细列表中先手工添加/关联**至少一笔任意费用明细**（确保 `费用明细不为空`），随后再次点击测试/计算即可成功触发。 |
+| **控制台/SLS报错：Unable to build expression for consequence: offset -1, count 1, length 0** | `1)` `then ... end` 内部 `//` 单行注释截断了 AST 语法树或直接紧邻 `end`；<br>`2)` `new AllowanceResult(...)` 使用了官方 4 个重载签名之外的错误传参组合或类型不匹配。 | `1)` 将注释改换行或改用 `/* ... */`，保证 `end` 干净独立；<br>`2)` 严格对照 `(DateTime, String, BigDecimal, String, String)` 官方传参校验。 |
 
 ### 2. 阿里云 SLS 底层 Java 异常堆栈排查步骤 (极重中之重)
 #### 核心背景

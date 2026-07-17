@@ -30,8 +30,7 @@ rule "按照表单自定义天数与同行参与人数汇总计算补贴"
             $customFormValues : customFormValues,
             $travelPartnerInfo : travelPartnerInfo,
             $baseCcy : baseCcy,
-            $collectionCcy : collectionCcy,
-            $submittedAt : submittedAt
+            $collectionCcy : collectionCcy
         )
     then
         try {
@@ -78,7 +77,15 @@ rule "按照表单自定义天数与同行参与人数汇总计算补贴"
             // ----------------------------------------------------
             // 步骤 4：构造整单唯一补贴对象 AllowanceResult 并插入
             // ----------------------------------------------------
-            DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
+            // 严禁使用 $submittedAt / $firstSubmittedAt（单据草稿及计算试运行阶段该字段为 0 / 1970年）
+            DateTime consumeDate = null;
+            if ($reimburse.getExpenses() != null && !$reimburse.getExpenses().isEmpty()) {
+                consumeDate = $reimburse.getExpenses().get(0).getConsumeDate();
+            }
+            if (consumeDate == null) {
+                consumeDate = DateTime.now();
+            }
+
             String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
             String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
 

@@ -79,11 +79,14 @@ rule "按照表单自定义天数与同行参与人数汇总计算补贴"
             // 步骤 4：构造整单唯一补贴对象 AllowanceResult 并插入
             // ----------------------------------------------------
             DateTime consumeDate = ($submittedAt != null) ? $submittedAt : DateTime.now();
+            // 严格按 年-月-日 (yyyy-MM-dd) 格式化/归一化处理，去除时分秒干扰
+            consumeDate = consumeDate.withTimeAtStartOfDay();
+
             String ccy = ($baseCcy != null && !$baseCcy.isEmpty()) ? $baseCcy : "CNY";
             String colCcy = ($collectionCcy != null && !$collectionCcy.isEmpty()) ? $collectionCcy : ccy;
 
             insert(new AllowanceResult(consumeDate, "32", totalAmount, ccy, colCcy));
-            logger.info("🎉 报销单整单补贴生成成功: feecode=32, {}天 * {}人 * 50元 = {}元", days, personCount, totalAmount);
+            logger.info("🎉 报销单整单补贴生成成功: feecode=32, {}天 * {}人 * 50元 = {}元, 消费日期={}", days, personCount, totalAmount, consumeDate.toString("yyyy-MM-dd"));
 
         } catch (Throwable t) {
             logger.error("执行过程发生未捕获异常: {}", t.getMessage(), t);
